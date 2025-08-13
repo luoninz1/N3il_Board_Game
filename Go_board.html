@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>No‑Three‑in‑Line — Interactive Go‑Style Board (v3)</title>
+  <style>
+    :root {
+      --bg: #0f1115;
+      --panel: #161a22;
+      --panel-2: #1d2330;
+      --text: #e7ecf3;
+      --muted: #9aa4b2;
+      --accent: #8ab4ff;
+      --danger: #ff6b6b;
+      --ok: #7ae582;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; padding: 24px; background: var(--bg); color: var(--text); font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, Apple Color Emoji, Segoe UI Emoji; }
+    h1 { font-size: 20px; margin: 0 0 12px; font-weight: 700; letter-spacing: .2px; }
+    .app { max-width: 1100px; margin: 0 auto; display: grid; gap: 16px; grid-template-columns: 360px 1fr; }
+    @media (max-width: 980px) { .app { grid-template-columns: 1fr; } }
+
+    .panel { background: linear-gradient(180deg, var(--panel), var(--panel-2)); border: 1px solid #202636; border-radius: 16px; padding: 16px; box-shadow: 0 8px 24px rgba(0,0,0,.3); }
+    .controls label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 6px; }
+    .row { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: end; margin-bottom: 14px; }
+    .row.two { grid-template-columns: 1fr 1fr; }
+    input[type=number], input[type=text], select { width: 100%; padding: 10px 12px; border-radius: 12px; border: 1px solid #2a3244; outline: none; background: #121723; color: var(--text); }
+    button { cursor: pointer; border: 1px solid #2a3244; border-radius: 12px; padding: 10px 14px; background: #121723; color: var(--text); font-weight: 600; letter-spacing: .2px; }
+    button:hover { border-color: #3a435a; }
+    button.accent { background: #172034; border-color: #26324d; color: var(--accent); }
+    button.danger { background: #2a1418; border-color: #4a1d25; color: var(--danger); }
+
+    .status { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin-top: 8px; }
+    .stat { background: rgba(255,255,255,.03); border: 1px solid #202636; border-radius: 12px; padding: 10px 12px; }
+    .stat .k { font-size: 11px; color: var(--muted); }
+    .stat .v { font-size: 18px; font-weight: 700; }
+
+    .legend { font-size: 12px; color: var(--muted); margin-top: 10px; line-height: 1.5; }
+
+    .board-wrap { position: relative; }
+    canvas { width: 100%; height: auto; display: block; background: #f1d59a; border-radius: 16px; border: 1px solid #e0c074; }
+    .toast { position: absolute; top: 12px; right: 12px; background: rgba(22,26,34,.85); border: 1px solid #30384e; color: var(--text); padding: 10px 12px; border-radius: 12px; font-size: 13px; pointer-events: none; opacity: 0; transform: translateY(-6px); transition: .22s ease; }
+    .toast.show { opacity: 1; transform: translateY(0); }
+    .pill { display: inline-block; padding: 2px 8px; border-radius: 999px; font-weight: 700; font-size: 11px; vertical-align: baseline; }
+    .pill.ok { background: #0f2a18; color: var(--ok); border: 1px solid #184b2a; }
+    .pill.no { background: #2a161a; color: var(--danger); border: 1px solid #4a1d25; }
+
+    .hint { font-size: 12px; color: var(--muted); margin-top: 8px; }
+  </style>
+</head>
+<body>
+  <h1>No‑Three‑in‑Line — Go‑Style Board</h1>
+  <div class="app">
+    <section class="panel controls">
+      <div class="row two">
+        <div>
+          <label>Board size (n × n)</label>
+          <input id="sizeInput" type="number" min="3" max="25" step="1" value="13" />
+        </div>
+        <div>
+          <label>&nbsp;</label>
+          <button id="applySize" class="accent" title="Reset and apply size">Apply Size</button>
+        </div>
+      </div>
+
+      <div class="row two">
+        <button id="undoBtn">Undo</button>
+        <button id="resetBtn" class="danger">Reset</button>
+      </div>
+
+      <div class="row">
+        <div>
+          <label>Export / Import position</label>
+          <input id="positionIO" type="text" placeholder="e.g. (3,5);(6,6);(10,2)" />
+        </div>
+        <button id="loadBtn" title="Load coordinates">Load</button>
+      </div>
+
+      <div class="status">
+        <div class="stat">
+          <div class="k">Current stones</div>
+          <div class="v" id="stoneCount">0</div>
+        </div>
+        <div class="stat">
+          <div class="k">Personal best (this size)</div>
+          <div class="v" id="bestCount">0</div>
+        </div>
+      </div>
+
+      <div class="legend">
+        Click intersections to place stones. Click again on an existing stone to <strong>remove</strong> it. <br/>
+        If a move creates three collinear points, it is still placed but shown <strong style="color:#ff6b6b">red</strong>.
+      </div>
+      <div class="hint">Tip: You can paste/export coordinates from the box above to share a configuration.</div>
+    </section>
+
+    <section class="panel board-wrap">
+      <div id="toast" class="toast">&nbsp;</div>
+      <canvas id="board" width="900" height="900" aria-label="Go board canvas" role="img"></canvas>
+    </section>
+  </div>
+
+  <script>
+    // --- Utilities ---
+    const $ = (sel) => document.querySelector(sel);
+    const DPR = window.devicePixelRatio || 1;
+
+    function keyFor(p) { return `${p.x},${p.y}`; }
+    function collinear(a,b,c){
+      // area of triangle == 0
+      return (a.x*(b.y - c.y) + b.x*(c.y - a.y) + c.x*(a.y - b.y)) === 0;
+    }
+
+    // --- State ---
+    let n = 13;                 // board size
+    // stones now store validity: {x,y, invalid:boolean}
+    let stones = [];
+    let stoneSet = new Set();   // occupancy key "x,y"
+    let lastInvalidTriplet = null; // [[a],[b],[c]] for feedback line
+
+    // --- Canvas & drawing ---
+    const canvas = $('#board');
+    const ctx = canvas.getContext('2d');
+
+    function resizeForDPR(){
+      const cssSize = Math.min(canvas.parentElement.clientWidth, 900);
+      canvas.style.width = cssSize + 'px';
+      canvas.style.height = cssSize + 'px';
+      canvas.width = Math.round(cssSize * DPR);
+      canvas.height = Math.round(cssSize * DPR);
+    }
+
+    function drawBoard(){
+      resizeForDPR();
+      const W = canvas.width, H = canvas.height;
+      ctx.clearRect(0,0,W,H);
+
+      // Wood background
+      const grd = ctx.createLinearGradient(0,0,0,H);
+      grd.addColorStop(0,'#f6dba4');
+      grd.addColorStop(1,'#e8c683');
+      ctx.fillStyle = grd; ctx.fillRect(0,0,W,H);
+
+      // Larger margin so edge stones don't clip outside the canvas
+      const margin = Math.round(0.10 * W);
+      const size = Math.min(W,H) - 2*margin;
+      const cell = size / (n-1);
+
+      // Store layout for hit‑testing
+      canvas._layout = {margin, size, cell, W, H};
+
+      // Board border
+      ctx.strokeStyle = '#a6803a'; ctx.lineWidth = 2 * DPR;
+      ctx.strokeRect(margin, margin, size, size);
+
+      // Grid lines
+      ctx.strokeStyle = '#6b5121'; ctx.lineWidth = 1 * DPR;
+      ctx.beginPath();
+      for(let i=0;i<n;i++){
+        const x = margin + i*cell;
+        const y = margin + i*cell;
+        ctx.moveTo(margin, y); ctx.lineTo(margin+size, y);
+        ctx.moveTo(x, margin); ctx.lineTo(x, margin+size);
+      }
+      ctx.stroke();
+
+      // Star points (for larger boards)
+      const stars = (n>=9) ? [2, Math.floor((n-1)/2), n-3] : [];
+      ctx.fillStyle = '#4b3620';
+      stars.forEach(i=>{
+        stars.forEach(j=>{
+          const x = margin + i*cell; const y = margin + j*cell;
+          ctx.beginPath(); ctx.arc(x,y, 2.2*DPR, 0, Math.PI*2); ctx.fill();
+        });
+      });
+
+      // Optional: draw last invalid line
+      if(lastInvalidTriplet){
+        const [a,b,c] = lastInvalidTriplet;
+        const p2c = p=>({X: margin + p.x*cell, Y: margin + p.y*cell});
+        const A=p2c(a), B=p2c(b), C=p2c(c);
+        ctx.strokeStyle = '#c74b4b'; ctx.lineWidth = 2.5*DPR;
+        ctx.beginPath(); ctx.moveTo(A.X, A.Y); ctx.lineTo(B.X, B.Y); ctx.lineTo(C.X, C.Y); ctx.stroke();
+      }
+
+      // Stones — use smaller radius so corner stones stay inside
+      const rBase = Math.max(5*DPR, 0.30 * cell);
+      stones.forEach((p)=>{
+        const x = margin + p.x*cell, y = margin + p.y*cell;
+        const r = rBase;
+        // shadow
+        ctx.fillStyle = 'rgba(0,0,0,.15)';
+        ctx.beginPath(); ctx.arc(x + 1*DPR, y + 1*DPR, r, 0, Math.PI*2); ctx.fill();
+        // stone fill (red if invalid)
+        ctx.fillStyle = p.invalid ? '#e44848' : '#0c0f14';
+        ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI*2); ctx.fill();
+        // glossy highlight on valid stones only
+        if(!p.invalid){
+          const rg = ctx.createRadialGradient(x - 0.35*r, y - 0.35*r, r*0.1, x, y, r);
+          rg.addColorStop(0, 'rgba(255,255,255,.22)');
+          rg.addColorStop(1, 'rgba(255,255,255,0)');
+          ctx.fillStyle = rg; ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI*2); ctx.fill();
+        }
+      });
+
+      // Edge coordinates (A.., 1..)
+      ctx.fillStyle = '#2c2f38'; ctx.font = `${12*DPR}px ui-sans-serif, system-ui`;
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      for(let i=0;i<n;i++){
+        const x = margin + i*cell; const y = margin + i*cell;
+        const colLabel = String.fromCharCode(65 + i); // A,B,C...
+        const rowLabel = (i+1).toString();
+        ctx.fillText(colLabel, x, margin - 12*DPR);
+        ctx.fillText(colLabel, x, margin + size + 12*DPR);
+        ctx.fillText(rowLabel, margin - 12*DPR, y);
+        ctx.fillText(rowLabel, margin + size + 12*DPR, y);
+      }
+    }
+
+    // --- Game logic ---
+    function showToast(html){
+      const t = $('#toast');
+      t.innerHTML = html; t.classList.add('show');
+      clearTimeout(t._timer);
+      t._timer = setTimeout(()=> t.classList.remove('show'), 1500);
+    }
+
+    function updateCounters(){
+      $('#stoneCount').textContent = stones.length;
+      const bestKey = `n3il-best-${n}`;
+      const best = Math.max(Number(localStorage.getItem(bestKey)||0), stones.length);
+      localStorage.setItem(bestKey, best);
+      $('#bestCount').textContent = best;
+    }
+
+    function reset(newN=null){
+      if(newN){ n = newN; }
+      stones = []; stoneSet = new Set(); lastInvalidTriplet = null;
+      drawBoard(); updateCounters();
+    }
+
+    function nearestGridPoint(evt){
+      const rect = canvas.getBoundingClientRect();
+      const x = (evt.clientX - rect.left) * DPR;
+      const y = (evt.clientY - rect.top) * DPR;
+      const {margin, cell} = canvas._layout;
+      const gx = Math.round((x - margin)/cell);
+      const gy = Math.round((y - margin)/cell);
+      if(gx < 0 || gx > n-1 || gy < 0 || gy > n-1) return null;
+      const px = margin + gx*cell, py = margin + gy*cell;
+      const dist2 = (x-px)*(x-px) + (y-py)*(y-py);
+      const tol = 0.22 * cell; // snap radius
+      if(dist2 <= tol*tol) return {x: gx, y: gy};
+      return null;
+    }
+
+    function wouldCreateThreeInLine(newP){
+      const k = stones.length;
+      for(let i=0;i<k;i++){
+        for(let j=i+1;j<k;j++){
+          const a = stones[i], b = stones[j];
+          if(collinear(a,b,newP)) return [a,b,newP];
+        }
+      }
+      return null;
+    }
+
+    function placeStone(p){
+      const k = keyFor(p);
+      // Toggle behavior: remove if exists
+      if(stoneSet.has(k)){
+        for(let i=0;i<stones.length;i++){
+          if(stones[i].x===p.x && stones[i].y===p.y){ stones.splice(i,1); break; }
+        }
+        stoneSet.delete(k); lastInvalidTriplet = null; drawBoard(); updateCounters();
+        showToast('<span class="pill ok">Removed</span> Stone removed.');
+        return;
+      }
+      // Try to place; mark invalid if it creates a 3‑in‑line
+      const trip = wouldCreateThreeInLine(p);
+      lastInvalidTriplet = trip; // keep visual feedback
+      if(trip){
+        stones.push({...p, invalid:true});
+        stoneSet.add(k);
+        drawBoard(); updateCounters();
+        showToast('<span class="pill no">Marked</span> Collinear — shown in red.');
+        return;
+      }
+      stones.push({...p, invalid:false}); stoneSet.add(k);
+      drawBoard(); updateCounters();
+      showToast('<span class="pill ok">Placed</span> Nice!');
+    }
+
+    // --- Interactions ---
+    canvas.addEventListener('click', (e)=>{
+      const p = nearestGridPoint(e);
+      if(!p){ showToast('Click near an intersection.'); return; }
+      placeStone(p);
+    });
+
+    window.addEventListener('resize', drawBoard);
+
+    $('#applySize').addEventListener('click', ()=>{
+      const v = Math.max(3, Math.min(25, Number($('#sizeInput').value||13)));
+      $('#sizeInput').value = v;
+      reset(v);
+    });
+
+    $('#resetBtn').addEventListener('click', ()=> reset());
+
+    $('#undoBtn').addEventListener('click', ()=>{
+      const p = stones.pop();
+      if(p){ stoneSet.delete(keyFor(p)); lastInvalidTriplet = null; drawBoard(); updateCounters(); }
+    });
+
+    $('#loadBtn').addEventListener('click', ()=>{
+      const txt = ($('#positionIO').value||'').trim();
+      if(!txt){ showToast('Paste coordinates like (3,5);(6,6)'); return; }
+      const coords = [];
+      const re = /\((\d+)\s*,\s*(\d+)\)/g;
+      let m; while((m = re.exec(txt))!==null){ coords.push({x: Number(m[1]), y: Number(m[2])}); }
+      if(!coords.length){ showToast('Could not parse coordinates.'); return; }
+      for(const p of coords){ if(p.x<0||p.x>n-1||p.y<0||p.y>n-1){ showToast('Some points out of range for current board.'); return; } }
+      stones = []; stoneSet = new Set(); lastInvalidTriplet = null;
+      for(const p of coords){
+        const k = keyFor(p);
+        if(stoneSet.has(k)) continue;
+        const trip = wouldCreateThreeInLine(p);
+        if(trip){ lastInvalidTriplet = trip; stones.push({...p, invalid:true}); stoneSet.add(k); }
+        else { stones.push({...p, invalid:false}); stoneSet.add(k); }
+      }
+      drawBoard(); updateCounters();
+    });
+
+    // Export on focus
+    $('#positionIO').addEventListener('focus', ()=>{
+      const s = stones.map(p=>`(${p.x},${p.y})`).join(';');
+      $('#positionIO').value = s;
+      $('#positionIO').select();
+    });
+
+    // Init
+    reset(n);
+  </script>
+</body>
+</html>
