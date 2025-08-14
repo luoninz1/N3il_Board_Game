@@ -257,15 +257,13 @@
     }
 
     function updateCounters(){
+      // Total stones (for UI) still shows all stones placed
       $('#stoneCount').textContent = stones.length;
+      // Personal best must count only valid stones
+      const validCount = stones.reduce((acc, p) => acc + (p.invalid ? 0 : 1), 0);
       const bestKey = `n3il-best-${n}`;
-      let stored = Number(localStorage.getItem(bestKey)||0);
-      // Sanity check: on a 3x3 board, max possible stones is 9
-      if (n === 3 && stored > 9) {
-        stored = 0;
-        localStorage.setItem(bestKey, 0);
-      }
-      const best = Math.max(stored, stones.length);
+      const stored = Number(localStorage.getItem(bestKey) || 0);
+      const best = Math.max(stored, validCount);
       localStorage.setItem(bestKey, best);
       $('#bestCount').textContent = best;
     }
