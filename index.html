@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>No‑Three‑in‑Line — Interactive Go‑Style Board (v3)</title>
+  <title>No‑Three‑in‑Line — Interactive Chess‑Style Board (v3)</title>
   <style>
     :root {
       --bg: #0f1115;
@@ -72,7 +72,7 @@
   </style>
 </head>
 <body>
-  <h1>No‑Three‑in‑Line — Go‑Style Board</h1>
+  <h1>No‑Three‑in‑Line — Chess‑Style Board</h1>
   <div class="app">
     <section class="panel controls">
       <div class="row two">
@@ -133,6 +133,7 @@
       // area of triangle == 0
       return (a.x*(b.y - c.y) + b.x*(c.y - a.y) + c.x*(a.y - b.y)) === 0;
     }
+  function igcd(a,b){ a=Math.abs(a); b=Math.abs(b); while(b){ const t=a%b; a=b; b=t; } return a||1; }
 
     // --- State ---
     let n = 3;                 // board size
@@ -166,58 +167,73 @@
       const W = canvas.width, H = canvas.height;
       ctx.clearRect(0,0,W,H);
 
-      // Wood background
-      const grd = ctx.createLinearGradient(0,0,0,H);
-      grd.addColorStop(0,'#f6dba4');
-      grd.addColorStop(1,'#e8c683');
-      ctx.fillStyle = grd; ctx.fillRect(0,0,W,H);
+  // Flat background
+  ctx.fillStyle = '#e9d1a1';
+  ctx.fillRect(0,0,W,H);
 
-      // Larger margin so edge stones don't clip outside the canvas
-      const margin = Math.round(0.10 * W);
-      const size = Math.min(W,H) - 2*margin;
-      const cell = size / (n-1);
+  // Chess board geometry
+  const margin = Math.round(0.08 * W);
+  const size = Math.min(W,H) - 2*margin;
+  const cell = size / n; // n squares per side
 
       // Store layout for hit‑testing
       canvas._layout = {margin, size, cell, W, H};
 
+      // Chess squares
+      const light = '#f4dcaf';
+      const dark = '#d6b078';
+      for(let sy=0; sy<n; sy++){
+        for(let sx=0; sx<n; sx++){
+          ctx.fillStyle = ((sx + sy) & 1) ? dark : light;
+          ctx.fillRect(margin + sx*cell, margin + sy*cell, cell, cell);
+        }
+      }
       // Board border
-      ctx.strokeStyle = '#a6803a'; ctx.lineWidth = 2 * DPR;
+      ctx.strokeStyle = '#8c6a33'; ctx.lineWidth = 2 * DPR;
       ctx.strokeRect(margin, margin, size, size);
 
-      // Grid lines
-      ctx.strokeStyle = '#6b5121'; ctx.lineWidth = 1 * DPR;
-      ctx.beginPath();
-      for(let i=0;i<n;i++){
-        const x = margin + i*cell;
-        const y = margin + i*cell;
-        ctx.moveTo(margin, y); ctx.lineTo(margin+size, y);
-        ctx.moveTo(x, margin); ctx.lineTo(x, margin+size);
+      // Collinear line visualization: any line with >=3 stones
+      if(stones.length >= 3){
+        const lineMap = new Map();
+        for(let i=0;i<stones.length;i++){
+          for(let j=i+1;j<stones.length;j++){
+            const a=stones[i], b=stones[j];
+            let dx=b.x - a.x, dy=b.y - a.y;
+            if(dx===0 && dy===0) continue;
+            const g=igcd(dx,dy); dx/=g; dy/=g;
+            if(dx<0 || (dx===0 && dy<0)){ dx=-dx; dy=-dy; }
+            const c = dx*a.y - dy*a.x; // invariant for line
+            const key = dx+','+dy+','+c;
+            let entry = lineMap.get(key);
+            if(!entry){ entry = {dx,dy,c, idxs: new Set()}; lineMap.set(key, entry); }
+            entry.idxs.add(i); entry.idxs.add(j);
+          }
+        }
+        ctx.strokeStyle = '#c74b4b'; ctx.lineWidth = 2.5*DPR; ctx.lineCap = 'round';
+        for(const entry of lineMap.values()){
+          if(entry.idxs.size < 3) continue;
+            let minP=null, maxP=null, minT=Infinity, maxT=-Infinity;
+            // parameter t using projection onto direction (dx,dy)
+            for(const idx of entry.idxs){
+              const p = stones[idx];
+              const t = entry.dx*p.x + entry.dy*p.y;
+              if(t < minT){ minT = t; minP = p; }
+              if(t > maxT){ maxT = t; maxP = p; }
+            }
+            if(minP && maxP){
+              const x1 = margin + (minP.x + 0.5)*cell;
+              const y1 = margin + (minP.y + 0.5)*cell;
+              const x2 = margin + (maxP.x + 0.5)*cell;
+              const y2 = margin + (maxP.y + 0.5)*cell;
+              ctx.beginPath(); ctx.moveTo(x1,y1); ctx.lineTo(x2,y2); ctx.stroke();
+            }
+        }
       }
-      ctx.stroke();
 
-      // Star points (for larger boards)
-      const stars = (n>=9) ? [2, Math.floor((n-1)/2), n-3] : [];
-      ctx.fillStyle = '#4b3620';
-      stars.forEach(i=>{
-        stars.forEach(j=>{
-          const x = margin + i*cell; const y = margin + j*cell;
-          ctx.beginPath(); ctx.arc(x,y, 2.2*DPR, 0, Math.PI*2); ctx.fill();
-        });
-      });
-
-      // Optional: draw last invalid line
-      if(lastInvalidTriplet){
-        const [a,b,c] = lastInvalidTriplet;
-        const p2c = p=>({X: margin + p.x*cell, Y: margin + p.y*cell});
-        const A=p2c(a), B=p2c(b), C=p2c(c);
-        ctx.strokeStyle = '#c74b4b'; ctx.lineWidth = 2.5*DPR;
-        ctx.beginPath(); ctx.moveTo(A.X, A.Y); ctx.lineTo(B.X, B.Y); ctx.lineTo(C.X, C.Y); ctx.stroke();
-      }
-
-      // Stones — use smaller radius so corner stones stay inside
-      const rBase = Math.max(5*DPR, 0.30 * cell);
+      // Stones — centered in squares now
+      const rBase = Math.max(5*DPR, 0.45 * cell);
       stones.forEach((p)=>{
-        const x = margin + p.x*cell, y = margin + p.y*cell;
+        const x = margin + (p.x + 0.5)*cell, y = margin + (p.y + 0.5)*cell;
         const r = rBase;
         // shadow
         ctx.fillStyle = 'rgba(0,0,0,.15)';
@@ -234,17 +250,17 @@
         }
       });
 
-      // Edge coordinates (A.., 1..)
+      // Edge coordinates centered relative to squares
       ctx.fillStyle = '#2c2f38'; ctx.font = `${12*DPR}px ui-sans-serif, system-ui`;
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
       for(let i=0;i<n;i++){
-        const x = margin + i*cell; const y = margin + i*cell;
-        const colLabel = String.fromCharCode(65 + i); // A,B,C...
+        const cx = margin + (i+0.5)*cell; const cy = margin + (i+0.5)*cell;
+        const colLabel = String.fromCharCode(65 + i);
         const rowLabel = (i+1).toString();
-        ctx.fillText(colLabel, x, margin - 12*DPR);
-        ctx.fillText(colLabel, x, margin + size + 12*DPR);
-        ctx.fillText(rowLabel, margin - 12*DPR, y);
-        ctx.fillText(rowLabel, margin + size + 12*DPR, y);
+        ctx.fillText(colLabel, cx, margin - 12*DPR);
+        ctx.fillText(colLabel, cx, margin + size + 12*DPR);
+        ctx.fillText(rowLabel, margin - 12*DPR, cy);
+        ctx.fillText(rowLabel, margin + size + 12*DPR, cy);
       }
     }
 
@@ -280,23 +296,20 @@
 
     function nearestGridPoint(evt){
       const rect = canvas.getBoundingClientRect();
-      // Handle both mouse and touch events
       const clientX = evt.clientX || (evt.touches && evt.touches[0] && evt.touches[0].clientX);
       const clientY = evt.clientY || (evt.touches && evt.touches[0] && evt.touches[0].clientY);
-      
       if (clientX === undefined || clientY === undefined) return null;
-      
       const x = (clientX - rect.left) * DPR;
       const y = (clientY - rect.top) * DPR;
       const {margin, cell} = canvas._layout;
-      const gx = Math.round((x - margin)/cell);
-      const gy = Math.round((y - margin)/cell);
-      if(gx < 0 || gx > n-1 || gy < 0 || gy > n-1) return null;
-      const px = margin + gx*cell, py = margin + gy*cell;
-      const dist2 = (x-px)*(x-px) + (y-py)*(y-py);
-      const tol = 0.22 * cell; // snap radius
-      if(dist2 <= tol*tol) return {x: gx, y: gy};
-      return null;
+      if(x < margin || y < margin) return null;
+      const relX = x - margin;
+      const relY = y - margin;
+      if(relX < 0 || relY < 0) return null;
+      const gx = Math.floor(relX / cell);
+      const gy = Math.floor(relY / cell);
+      if(gx < 0 || gx >= n || gy < 0 || gy >= n) return null;
+      return {x: gx, y: gy};
     }
 
     function wouldCreateThreeInLine(newP){
@@ -401,8 +414,22 @@
       $('#positionIO').select();
     });
 
-    // Init
-    reset(n);
+    // Init with optional query string override (?n=15 or ?size=15)
+    (function(){
+      try {
+        const params = new URLSearchParams(window.location.search);
+        const qs = params.get('n') || params.get('size');
+        if(qs!=null){
+          let v = parseInt(qs,10);
+          if(!Number.isNaN(v)){
+            v = Math.max(3, Math.min(25, v));
+            n = v;
+            $('#sizeInput').value = v;
+          }
+        }
+      } catch(e) { /* ignore */ }
+      reset(n);
+    })();
   </script>
 </body>
 </html>
