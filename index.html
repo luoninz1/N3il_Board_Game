@@ -78,7 +78,7 @@
       <div class="row two">
         <div>
           <label>Board size (n × n)</label>
-          <input id="sizeInput" type="number" min="3" max="25" step="1" value="3" />
+          <input id="sizeInput" type="number" min="3" max="50" step="1" value="3" />
         </div>
         <div>
           <label>&nbsp;</label>
@@ -110,9 +110,17 @@
         </div>
       </div>
 
+      <div class="row two" style="margin-top:8px;">
+        <button id="completeBtn" title="Toggle complete detection lines">Complete Detection: OFF</button>
+        <div></div>
+      </div>
+
       <div class="legend">
-        Click squares to place stones. Click again on an existing stone to <strong>remove</strong> it. <br/>
-        If a move creates three collinear points, it is still placed but shown <strong style="color:#ff6b6b">red</strong>.
+        <strong>Play:</strong> Click a square to place a stone; click the same square again to remove it. <br/>
+        <strong>Rule:</strong> Goal is to maximize stones such that no three lie on a straight line. Lines include any slope (horizontal, vertical, diagonal, or arbitrary). <br/>
+        If placing a stone creates a line of ≥3 stones, the stone is still placed but shown <strong style="color:#ff6b6b">red</strong> (invalid) and does not count toward Personal Best. All lines with ≥3 stones are drawn as solid red segments spanning the outermost stones on that line. <br/>
+  <strong>Complete Detection:</strong> When ON, every pair of stones generates a faint red line across the entire board (clipped to the edges). Every empty square lying anywhere on those discrete lattice lines is shaded translucent red. Use this to visualize future conflicts; turn OFF for a cleaner view. <br/>
+        Personal Best counts only valid (non‑red) stones.
       </div>
       <div class="hint">Tip: You can paste/export coordinates from the box above to share a configuration.</div>
     </section>
@@ -141,6 +149,7 @@
     let stones = [];
     let stoneSet = new Set();   // occupancy key "x,y"
     let lastInvalidTriplet = null; // [[a],[b],[c]] for feedback line
+  let completeDetectionOn = false; // toggled by button
 
     // --- Canvas & drawing ---
     const canvas = $('#board');
@@ -228,6 +237,59 @@
               ctx.beginPath(); ctx.moveTo(x1,y1); ctx.lineTo(x2,y2); ctx.stroke();
             }
         }
+      }
+
+      // Complete detection: pairwise lines + intermediate empty square highlighting
+  if(completeDetectionOn && stones.length >= 2){
+        ctx.save();
+        ctx.strokeStyle = 'rgba(198,75,75,0.6)';
+        ctx.lineWidth = 1.5 * DPR;
+        const emptiesToMark = new Set(); // key: x,y
+        for(let i=0;i<stones.length;i++){
+          for(let j=i+1;j<stones.length;j++){
+            const a = stones[i], b = stones[j];
+            let dx = b.x - a.x, dy = b.y - a.y;
+            const g = igcd(dx,dy);
+            if(g === 0) continue;
+            dx /= g; dy /= g; // step of one lattice unit along line
+            // Compute full board-clipped line through centers of a & b
+            const cx0 = a.x + 0.5, cy0 = a.y + 0.5;
+            const dirx = dx, diry = dy;
+            let tmin = -Infinity, tmax = Infinity;
+            function clampDim(p0, dp, minB, maxB){
+              if(dp === 0){ if(p0 < minB || p0 > maxB) return false; return true; }
+              const t1 = (minB - p0)/dp; const t2 = (maxB - p0)/dp;
+              const lo = Math.min(t1,t2), hi = Math.max(t1,t2);
+              if(lo > tmin) tmin = lo; if(hi < tmax) tmax = hi; return tmin <= tmax;
+            }
+            if(!clampDim(cx0, dirx, 0, n) || !clampDim(cy0, diry, 0, n)) continue;
+            const ex1x = cx0 + tmin*dirx, ex1y = cy0 + tmin*diry;
+            const ex2x = cx0 + tmax*dirx, ex2y = cy0 + tmax*diry;
+            ctx.beginPath();
+            ctx.moveTo(margin + ex1x*cell, margin + ex1y*cell);
+            ctx.lineTo(margin + ex2x*cell, margin + ex2y*cell);
+            ctx.stroke();
+            // Walk entire discrete line segment across board collecting empty squares
+            // Find starting lattice point along direction by stepping backwards
+            let sx = a.x, sy = a.y;
+            while(true){
+              const nx = sx - dx, ny = sy - dy;
+              if(nx < 0 || nx >= n || ny < 0 || ny >= n) break;
+              sx = nx; sy = ny;
+            }
+            for(let lx = sx, ly = sy; lx >= 0 && lx < n && ly >= 0 && ly < n; lx += dx, ly += dy){
+              const key = lx + ',' + ly;
+              if(!stoneSet.has(key)) emptiesToMark.add(key);
+            }
+          }
+        }
+        // highlight empty squares
+        ctx.fillStyle = 'rgba(255,70,70,0.35)';
+        for(const key of emptiesToMark){
+          const [sx,sy] = key.split(',').map(Number);
+          ctx.fillRect(margin + sx*cell, margin + sy*cell, cell, cell);
+        }
+        ctx.restore();
       }
 
       // Stones — centered in squares now
@@ -376,9 +438,16 @@
   // Intentionally do not auto-resize on window resize to avoid feedback loops.
 
     $('#applySize').addEventListener('click', ()=>{
-      const v = Math.max(3, Math.min(25, Number($('#sizeInput').value||3)));
+      const v = Math.max(3, Math.min(50, Number($('#sizeInput').value||3)));
       $('#sizeInput').value = v;
       reset(v);
+    });
+
+    // Complete detection toggle
+    $('#completeBtn').addEventListener('click', () => {
+      completeDetectionOn = !completeDetectionOn;
+      $('#completeBtn').textContent = `Complete Detection: ${completeDetectionOn ? 'ON' : 'OFF'}`;
+      drawBoard();
     });
 
     $('#resetBtn').addEventListener('click', ()=> reset());
@@ -422,12 +491,18 @@
         if(qs!=null){
           let v = parseInt(qs,10);
           if(!Number.isNaN(v)){
-            v = Math.max(3, Math.min(25, v));
+            v = Math.max(3, Math.min(50, v));
             n = v;
             $('#sizeInput').value = v;
           }
         }
+        const cdParam = params.get('complete') || params.get('cd');
+        if(cdParam!=null){
+          completeDetectionOn = /^(1|true|on|yes)$/i.test(cdParam);
+        }
       } catch(e) { /* ignore */ }
+      const btn = $('#completeBtn');
+      if(btn){ btn.textContent = `Complete Detection: ${completeDetectionOn ? 'ON' : 'OFF'}`; }
       reset(n);
     })();
   </script>
