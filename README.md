@@ -1,6 +1,14 @@
 # No‑Three‑in‑Line — Interactive Board (Chess‑Style)
 
-An interactive browser tool for exploring the classic "No Three In Line" problem on an n×n lattice. You place stones (points) on a chess‑style grid while trying to maximize the number of valid stones such that no three stones lie on a straight line of any slope.
+An interactive browser tool for exploring ## Planned / Possible Enhancements
+
+- Toggle to hide ≥3 collinear summary lines when Collinearity Detection is ON.
+- Option to export only valid stones.
+- Dark/light theme toggle.
+- Performance optimization for large dense boards (line hashing or sweep algorithms).
+- Shareable encoded board states via URL parameter.
+- Additional sample solutions for larger board sizes (13+).
+- Solution verification and optimality checking tools.ssic "No Three In Line" problem on an n×n lattice. You place stones (points) on a chess‑style grid while trying to maximize the number of valid stones such that no three stones lie on a straight line of any slope.
 
 ## Key Features
 
@@ -9,10 +17,15 @@ An interactive browser tool for exploring the classic "No Three In Line" problem
 - Stones that create a line of 3+ collinear stones remain visible but turn red (invalid) and don’t count toward your Personal Best.
 - Automatic tracking of per‑board‑size Personal Best (counts only valid stones, persisted in localStorage).
 - Collinear detection visualization: every line with ≥3 stones is drawn as a solid red segment spanning the extreme stones.
-- Complete Detection mode (toggle button):
+- **Collinearity Detection mode** (toggle button):
 	- Draws a faint red line across the whole board for every pair of stones.
 	- Highlights (red translucent overlay) every empty square lying on any of those lattice lines.
 	- Helps you see future conflicts and potential blocked positions.
+- **Show Sample Solution** feature:
+	- Loads optimal known solutions for board sizes 3–12.
+	- Solutions are not unique—multiple optimal arrangements may exist.
+	- Button automatically disables for sizes >12 with explanatory text.
+	- Clicking erases current board and loads the sample configuration.
 - Import / export coordinates via a simple text box (format: `(x,y);(x2,y2);...`).
 - Undo last placement/removal and full board Reset.
 - High‑DPI canvas rendering with stable sizing (prevents layout drift) and mobile/touch support.
@@ -34,7 +47,7 @@ You can control initial settings by appending parameters to the URL (local file 
 | Param | Example | Description |
 |-------|---------|-------------|
 | `n` or `size` | `?n=19` | Sets initial board size (3–50). |
-| `complete`, `cd` | `?complete=on` / `?cd=1` | Turns Complete Detection ON at load (accepts `1,true,on,yes`). |
+| `complete`, `cd` | `?complete=on` / `?cd=1` | Turns Collinearity Detection ON at load (accepts `1,true,on,yes`). |
 
 Multiple parameters can be combined, e.g. `?n=25&complete=on`.
 
@@ -44,6 +57,31 @@ Multiple parameters can be combined, e.g. `?n=25&complete=on`.
 - Displayed labels use A,B,C,… for columns and 1..n for rows.
 - A coordinate `(x,y)` in the import/export box refers to column `x` from the left and row `y` from the top (both zero‑based).
 
+## Sample Solutions
+
+The application includes pre-computed optimal solutions for board sizes 3–12. These solutions are:
+
+- Stored in `sample_solutions.json` (generated from `grid_conversion.py`).
+- Automatically loaded when the page loads.
+- Accessible via the "Show Sample Solution" button.
+- Not unique—multiple optimal arrangements exist for each board size.
+
+### Sample Solution Counts by Board Size
+
+| Size | Max Stones | Sample Configuration Available |
+|------|------------|--------------------------------|
+| 3×3  | 6          | ✓ |
+| 4×4  | 8          | ✓ |
+| 5×5  | 10         | ✓ |
+| 6×6  | 12         | ✓ |
+| 7×7  | 14         | ✓ |
+| 8×8  | 16         | ✓ |
+| 9×9  | 18         | ✓ |
+| 10×10| 20         | ✓ |
+| 11×11| 22         | ✓ |
+| 12×12| 24         | ✓ |
+| >12  | —          | ✗ (Button disabled) |
+
 ## Data Persistence
 
 Personal bests are stored in `localStorage` under keys of the form `n3il-best-{n}` and scoped per board size.
@@ -51,7 +89,7 @@ Personal bests are stored in `localStorage` under keys of the form `n3il-best-{n
 ## Performance Notes
 
 - Collinear detection is O(k²) over current stones (k = number of placed stones).
-- Complete Detection also loops over O(k²) pairs and traces lines across the board; very large boards with many stones may become slower.
+- Collinearity Detection also loops over O(k²) pairs and traces lines across the board; very large boards with many stones may become slower.
 - For exploration, this is typically sufficient. If you need larger scales, consider pruning or incremental line indexing.
 
 ## Import / Export Format
@@ -74,7 +112,16 @@ Invalid or out‑of‑range points for the current board size abort the load wit
 
 ## Development
 
-Single file (`index.html`) — open directly in a modern browser. No build step required.
+Core application: Single file (`index.html`) — open directly in a modern browser. No build step required.
+
+Additional files:
+- `sample_solutions.json` — Pre-computed optimal solutions for board sizes 3–12.
+- `grid_conversion.py` — Python script to convert grid arrays to coordinate format and generate the JSON file.
+
+To regenerate sample solutions:
+```bash
+python grid_conversion.py
+```
 
 ## License
 

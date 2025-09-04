@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="viewport" content="width=device-width, i        <strong>Collinearity Detection:</strong> When ON, every pair of stones generates a faint red line across the entire board (clipped to the edges). Every empty square lying anywhere on those discrete lattice lines is shaded translucent red. Use this to visualize future conflicts; turn OFF for a cleaner view. <br/>itial-scale=1" />
   <title>No‑Three‑in‑Line — Interactive Chess‑Style Board (v3)</title>
   <style>
     :root {
@@ -39,6 +39,8 @@
     input[type=number], input[type=text], select { width: 100%; padding: 10px 12px; border-radius: 12px; border: 1px solid #2a3244; outline: none; background: #121723; color: var(--text); min-height: 44px; /* Better touch target */ }
     button { cursor: pointer; border: 1px solid #2a3244; border-radius: 12px; padding: 10px 14px; background: #121723; color: var(--text); font-weight: 600; letter-spacing: .2px; min-height: 44px; /* Better touch target */ }
     button:hover { border-color: #3a435a; }
+    button:disabled { cursor: not-allowed; opacity: 0.6; }
+    button small { font-size: 10px; font-weight: 400; display: block; margin-top: 2px; }
     button.accent { background: #172034; border-color: #26324d; color: var(--accent); }
     button.danger { background: #2a1418; border-color: #4a1d25; color: var(--danger); }
 
@@ -111,15 +113,16 @@
       </div>
 
       <div class="row two" style="margin-top:8px;">
-        <button id="completeBtn" title="Toggle complete detection lines">Complete Detection: OFF</button>
-        <div></div>
+        <button id="completeBtn" title="Toggle collinearity detection lines">Collinearity Detection: OFF</button>
+        <button id="sampleBtn" title="Load sample solution for current board size">Show Sample Solution</button>
       </div>
 
       <div class="legend">
         <strong>Play:</strong> Click a square to place a stone; click the same square again to remove it. <br/>
         <strong>Rule:</strong> Goal is to maximize stones such that no three lie on a straight line. Lines include any slope (horizontal, vertical, diagonal, or arbitrary). <br/>
         If placing a stone creates a line of ≥3 stones, the stone is still placed but shown <strong style="color:#ff6b6b">red</strong> (invalid) and does not count toward Personal Best. All lines with ≥3 stones are drawn as solid red segments spanning the outermost stones on that line. <br/>
-  <strong>Complete Detection:</strong> When ON, every pair of stones generates a faint red line across the entire board (clipped to the edges). Every empty square lying anywhere on those discrete lattice lines is shaded translucent red. Use this to visualize future conflicts; turn OFF for a cleaner view. <br/>
+        <strong>Collinearity Detection:</strong> When ON, every pair of stones generates a faint red line across the entire board (clipped to the edges). Every empty square lying anywhere on those discrete lattice lines is shaded translucent red. Use this to visualize future conflicts; turn OFF for a cleaner view. <br/>
+        <strong>Show Sample Solution:</strong> Loads an optimal solution for the current board size (available for sizes 3-12). Note that solutions are not unique—multiple optimal arrangements may exist. Clicking this button will erase all existing stones on the board and replace them with the sample configuration. <br/>
         Personal Best counts only valid (non‑red) stones.
       </div>
       <div class="hint">Tip: You can paste/export coordinates from the box above to share a configuration.</div>
@@ -149,7 +152,8 @@
     let stones = [];
     let stoneSet = new Set();   // occupancy key "x,y"
     let lastInvalidTriplet = null; // [[a],[b],[c]] for feedback line
-  let completeDetectionOn = false; // toggled by button
+    let completeDetectionOn = false; // toggled by button
+    let sampleSolutions = {}; // loaded from JSON
 
     // --- Canvas & drawing ---
     const canvas = $('#board');
@@ -346,14 +350,43 @@
       $('#bestCount').textContent = best;
     }
 
-    function reset(newN=null){
+    function updateSampleButton(){
+      const btn = $('#sampleBtn');
+      const hasSample = sampleSolutions.hasOwnProperty(n.toString());
+      
+      if (hasSample) {
+        btn.disabled = false;
+        btn.style.color = 'var(--text)';
+        btn.style.background = '#121723';
+        btn.innerHTML = 'Show Sample Solution';
+      } else {
+        btn.disabled = true;
+        btn.style.color = 'var(--muted)';
+        btn.style.background = '#0a0c10';
+        btn.innerHTML = 'Show Sample Solution<br><small>Not available for this board size</small>';
+      }
+    }
+
+    async function loadSampleSolutions() {
+      try {
+        const response = await fetch('sample_solutions.json');
+        if (response.ok) {
+          sampleSolutions = await response.json();
+          updateSampleButton();
+        } else {
+          console.warn('Could not load sample solutions');
+        }
+      } catch (error) {
+        console.warn('Error loading sample solutions:', error);
+      }
+    }    function reset(newN=null){
       if(newN){ 
         n = newN; 
         // Update input field to match
         $('#sizeInput').value = n;
       }
       stones = []; stoneSet = new Set(); lastInvalidTriplet = null;
-      drawBoard(); updateCounters();
+      drawBoard(); updateCounters(); updateSampleButton();
     }
 
     function nearestGridPoint(evt){
@@ -446,8 +479,49 @@
     // Complete detection toggle
     $('#completeBtn').addEventListener('click', () => {
       completeDetectionOn = !completeDetectionOn;
-      $('#completeBtn').textContent = `Complete Detection: ${completeDetectionOn ? 'ON' : 'OFF'}`;
+      $('#completeBtn').textContent = `Collinearity Detection: ${completeDetectionOn ? 'ON' : 'OFF'}`;
       drawBoard();
+    });
+
+    // Sample solution button
+    $('#sampleBtn').addEventListener('click', () => {
+      const sampleCoords = sampleSolutions[n.toString()];
+      if (!sampleCoords) {
+        showToast('No sample solution available for this board size.');
+        return;
+      }
+
+      // Clear current board
+      stones = []; 
+      stoneSet = new Set(); 
+      lastInvalidTriplet = null;
+
+      // Load sample solution using existing coordinate parsing logic
+      const coords = [];
+      const re = /\((\d+)\s*,\s*(\d+)\)/g;
+      let m; 
+      while((m = re.exec(sampleCoords)) !== null) { 
+        coords.push({x: Number(m[1]), y: Number(m[2])}); 
+      }
+
+      // Place stones from sample solution
+      for(const p of coords){
+        const k = keyFor(p);
+        if(stoneSet.has(k)) continue;
+        const trip = wouldCreateThreeInLine(p);
+        if(trip){ 
+          lastInvalidTriplet = trip; 
+          stones.push({...p, invalid:true}); 
+          stoneSet.add(k); 
+        } else { 
+          stones.push({...p, invalid:false}); 
+          stoneSet.add(k); 
+        }
+      }
+
+      drawBoard(); 
+      updateCounters();
+      showToast('<span class="pill ok">Loaded</span> Sample solution loaded!');
     });
 
     $('#resetBtn').addEventListener('click', ()=> reset());
@@ -502,7 +576,11 @@
         }
       } catch(e) { /* ignore */ }
       const btn = $('#completeBtn');
-      if(btn){ btn.textContent = `Complete Detection: ${completeDetectionOn ? 'ON' : 'OFF'}`; }
+      if(btn){ btn.textContent = `Collinearity Detection: ${completeDetectionOn ? 'ON' : 'OFF'}`; }
+      
+      // Load sample solutions
+      loadSampleSolutions();
+      
       reset(n);
     })();
   </script>
